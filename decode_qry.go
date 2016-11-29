@@ -47,6 +47,7 @@ type queryResult struct {
 	query       string
 	key         string
 	hasAsterisk bool
+	level       int
 
 	values []interface{}
 }
@@ -62,8 +63,8 @@ func (q *queryResult) nextKey() {
 	q.query = q.query[ind+1:]
 }
 
-// Query extracts data specified by the query from the msgpack stream skipping
-// any other data. Query consists of map keys and array indexes separated with dot,
+// query extracts data specified by the query from the msgpack stream skipping
+// any other data. query consists of map keys and array indexes separated with dot,
 // e.g. key1.0.key2.
 func (d *Decoder) Query(query string) ([]interface{}, error) {
 	res := queryResult{
@@ -86,6 +87,7 @@ func (d *Decoder) query(q *queryResult) error {
 		return nil
 	}
 
+	// code is msgpack type code
 	code, err := d.PeekCode()
 	if err != nil {
 		return err
@@ -97,7 +99,7 @@ func (d *Decoder) query(q *queryResult) error {
 	case code == Array16 || code == Array32 || IsFixedArray(code):
 		err = d.queryArrayIndex(q)
 	default:
-		err = fmt.Errorf("msgpack: unsupported code=%x decoding key=%q", code, q.key)
+		err = fmt.Errorf("msgpack: unsupported code=% x decoding key=%q", code, q.key)
 	}
 	return err
 }
@@ -112,6 +114,7 @@ func (d *Decoder) queryMapKey(q *queryResult) error {
 	}
 
 	for i := 0; i < n; i++ {
+
 		k, err := d.bytesNoCopy()
 		if err != nil {
 			return err
@@ -121,9 +124,12 @@ func (d *Decoder) queryMapKey(q *queryResult) error {
 			if err := d.query(q); err != nil {
 				return err
 			}
-			if q.hasAsterisk {
+			if q.level > 0 {
 				return d.skipNext((n - i - 1) * 2)
 			}
+			//if q.hasAsterisk {
+			//	return d.skipNext((n - i - 1) * 2)
+			//}
 			return nil
 		}
 
@@ -145,7 +151,9 @@ func (d *Decoder) queryArrayIndex(q *queryResult) error {
 	}
 
 	if q.key == "*" {
-		q.hasAsterisk = true
+
+		q.level++
+		fmt.Printf("\tq.level = %d <-- WAS JUST INCREMENTED\n", q.level)
 
 		query := q.query
 		for i := 0; i < n; i++ {
@@ -155,10 +163,12 @@ func (d *Decoder) queryArrayIndex(q *queryResult) error {
 			}
 		}
 
-		q.hasAsterisk = false
+		q.level--
+		fmt.Printf("\tq.level = %d <-- WAS JUST DECREMENTED\n", q.level)
 		return nil
 	}
 
+	// specific index search
 	ind, err := strconv.Atoi(q.key)
 	if err != nil {
 		return err
@@ -169,7 +179,7 @@ func (d *Decoder) queryArrayIndex(q *queryResult) error {
 			if err := d.query(q); err != nil {
 				return err
 			}
-			if q.hasAsterisk {
+			if q.level > 0 {
 				return d.skipNext(n - i - 1)
 			}
 			return nil
