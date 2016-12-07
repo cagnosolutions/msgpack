@@ -6,48 +6,79 @@ import (
 	"strings"
 )
 
+func (q *queryResult) assert(v interface{}) bool {
+	if q.op == "" {
+		return true
+	}
+	s1, s2 := fmt.Sprintf("%.24v", v), fmt.Sprintf("%.24v", q.cmp)
+	switch q.op {
+	case "=":
+		return s1 == s2
+	case "!":
+		return s1 != s2
+	case "<":
+		return s1 < s2
+	case ">":
+		return s1 > s2
+	default:
+		return false
+	}
+}
+
 type queryResult struct {
-	query string
 	key   string
+	query string
+	op    string
+	cmp   string
+	vals  []interface{}
 	iter  int
-	//state int
-	vals []interface{}
-	//ops   []interface{}
-	//args  []interface{}
 }
 
 // assign the next key by locating the index of the dot seperator,
 // and simultaneously update the remaining query string.
 func (q *queryResult) nextKey() {
-
-	//fmt.Printf("[BEFOR] => q.query=%q, q.key=%q\n", q.query, q.key)
-
-	ind := strings.IndexByte(q.query, '.')
-	// we found no dot notation...
-	if ind == -1 {
-		if n := strings.IndexByte(q.query, ' '); n != -1 {
-			ind = n
-			goto mark
-		}
-		q.key = q.query
-		q.query = ""
+	// search for dot
+	if ind := strings.IndexByte(q.query, '.'); ind != -1 {
+		// update the key, and the query strings respectively
+		q.key = q.query[:ind]
+		q.query = q.query[ind+1:]
 		return
 	}
-mark:
-	// update the key, and the query strings respectively
-	q.key = q.query[:ind]
-	q.query = q.query[ind+1:]
-	//fmt.Printf("[AFTER] => q.query=%q, q.key=%q\n", q.query, q.key)
+	// we found no dot notation (ie. we have found the "last" key)
+	q.key = q.query
+	q.query = ""
 }
 
 // extracts data specified by the query from the msgpack stream, skipping any other data
-func (d *Decoder) Query(query string, args ...interface{}) ([]interface{}, error) {
-	// assemble a query result struct
-	// based on the supplied query
-	res := queryResult{
-		query: query,
-		//args:  args,
+func (d *Decoder) Query(q string) ([]interface{}, error) {
+
+	// extract the query fields from within the query
+	qry := strings.Fields(q)
+	if len(qry) != 3 && len(qry) != 1 {
+		return nil, fmt.Errorf("[msgpack]: invalid number of aruguments or format\n")
 	}
+
+	var res queryResult
+
+	if len(qry) == 1 {
+		res.query = qry[0]
+		goto mark
+	}
+
+	// check for valid operator
+	if qry[1] != "=" && qry[1] != "!" && qry[1] != "<" && qry[1] != ">" {
+		return nil, fmt.Errorf("[msgpack]: invalid operator (%q) supplied, only accepts `=, !, <, >`\n")
+	}
+
+	// assemble a query result struct
+	// based on the qualified qry string
+	res = queryResult{
+		query: qry[0],
+		op:    qry[1],
+		cmp:   qry[2],
+	}
+
+mark:
 	// pass query result pointer into the internal
 	// query method. it will keep it's own state
 	// as it recursively parses the query string
@@ -71,8 +102,9 @@ func (d *Decoder) query(q *queryResult) error {
 		if err != nil {
 			return err
 		}
-		// compare??
-		q.vals = append(q.vals, v)
+		if q.assert(v) {
+			q.vals = append(q.vals, v)
+		}
 		return nil
 	}
 
@@ -87,39 +119,10 @@ func (d *Decoder) query(q *queryResult) error {
 		err = d.queryMapKey(q)
 	case code == Array16 || code == Array32 || IsFixedArray(code):
 		err = d.queryArrayIndex(q)
-	case q.key == "=" || q.key == "<" || q.key == ">" || q.key == "!":
-		err = d.nextOp(q)
-	case q.query == "cmp":
-		err = d.compareValues(q)
 	default:
 		err = fmt.Errorf("[msgpack error] code: \"%v\", key: %q, query: %q\n", code, q.key, q.query)
-		//err = fmt.Errorf("msgpack: unsupported code=% x decoding key=%q", code, q.key)
 	}
 	return err
-}
-
-func (d *Decoder) nextOp(q *queryResult) error {
-	op := q.key
-	fmt.Printf("\t>> ENCOUNTERED AN OPERATOR: %q, ", op)
-	q.nextKey()
-	if err := d.Skip(); err != nil {
-		return err
-	}
-	q.query = "cmp"
-	//if err := d.query(q); err != nil {
-	//	return err
-	//}
-	fmt.Printf("KEY IS: %q, QUERY IS: %q\n", q.key, q.query)
-	return nil
-}
-
-func (d *Decoder) compareValues(q *queryResult) error {
-	fmt.Printf("\t>> COMPARING VALUE: %q\n", q.key)
-	q.nextKey()
-	if err := d.Skip(); err != nil {
-		return err
-	}
-	return nil
 }
 
 func (d *Decoder) queryMapKey(q *queryResult) error {
