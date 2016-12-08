@@ -10,16 +10,20 @@ func (q *queryResult) assert(v interface{}) bool {
 	if q.op == "" {
 		return true
 	}
-	s1, s2 := fmt.Sprintf("%.24v", v), fmt.Sprintf("%.24v", q.cmp)
+	s1, s2 := fmt.Sprintf("%020v", v), fmt.Sprintf("%020v", q.cmp)
 	switch q.op {
-	case "=":
+	case "==":
 		return s1 == s2
-	case "!":
+	case "!=":
 		return s1 != s2
 	case "<":
 		return s1 < s2
 	case ">":
 		return s1 > s2
+	case ">=":
+		return s1 >= s2
+	case "<=":
+		return s1 <= s2
 	default:
 		return false
 	}
@@ -66,8 +70,8 @@ func (d *Decoder) Query(q string) ([]interface{}, error) {
 	}
 
 	// check for valid operator
-	if qry[1] != "=" && qry[1] != "!" && qry[1] != "<" && qry[1] != ">" {
-		return nil, fmt.Errorf("[msgpack]: invalid operator (%q) supplied, only accepts `=, !, <, >`\n")
+	if qry[1] != "==" && qry[1] != "!=" && qry[1] != "<" && qry[1] != ">" && qry[1] != ">=" && qry[1] != "<=" {
+		return nil, fmt.Errorf("[msgpack]: invalid operator (%q) supplied, only accepts `==, !=, <, >, >=, <=`\n")
 	}
 
 	// assemble a query result struct
